@@ -1,5 +1,6 @@
 import requests
 from bs4 import BeautifulSoup
+import pandas as pd
 
 base = "https://www.dongqiudi.com"
 qualified_nation = ['喀麦隆', '塞内加尔', '突尼斯', '阿尔及利亚', '摩洛哥', '尼日利亚',   # 一档
@@ -20,7 +21,7 @@ def getOriHtmlText(url,code='utf-8'):
         return "There are some errors when get the original html!"
 
 # 获取每个俱乐部的球员信息
-def get_club_data(url):
+def get_club_data(url, team_name):
     html = getOriHtmlText(url)
     soup = BeautifulSoup(html,'html.parser')
     team_member = soup.findAll('script')
@@ -36,9 +37,7 @@ def get_club_data(url):
     for item in team_member_list:
         person_name = item[item.find('person_name:'): item.find(',scheme')]  # 获取该成员中文姓名
         person_id = item[item.find('person_id:'): item.find(',person_logo')]  # 获取该成员id
-
-        player_dict[person_name[13:-1]] = []
-        player_dict[person_name[13:-1]].append(person_id[11:-1])  # 对应信息存入字典中{'name': [info...]}
+        player_dict[person_name[13:-1]] = person_id[11:-1]  # 球员id存入字典中{name: id}
 
     # print(player_id_dict)
     player_list = soup.body.find_all(class_="analysis-list-item")  # 获取页面中显示成员表格的条目信息（为区分教练和队员）
@@ -54,16 +53,38 @@ def get_club_data(url):
     
     african_player = []
     for key,value in player_dict.items():
-        player_id = value[0]
-        player_html = getOriHtmlText(base + "/player/" + player_id + ".html")  # 请求访问球员个人详细信息
+        player_id = value
+        player_html = getOriHtmlText(base + "/player/" + player_id + ".html")  # 根据球员ID请求访问球员个人详细信息
         soup = BeautifulSoup(player_html,'html.parser')
-        player_nation = soup.body.find('div', class_='detail-info').find_all('li')[1].text[6:]
-        player_dict[key].append(player_nation)
+        if key == '':  # 若球员名字为空则重新获取球员名
+            player_name = soup.body.find('p', class_='china-name').text
+            # print(player_name)
+        else:
+            player_name = key
+        player_nation = soup.body.find('div', class_='detail-info').find_all('li')[1].text[6:]  # 获取球员国籍
         if player_nation in qualified_nation:
-            african_player.append(key)
+            tot = first = goal = ass = yc = rc = 0 # 数据初始化
+            capability = None
+            capability = soup.body.find('p', class_='average')
+            if capability != None:
+                capability = capability.text[4:]  # 获取球员能力值
+            season_list = soup.body.find('div', class_='match-data-con').find_all('p', class_='td')  # 获取球员能力值
+            for item in season_list:
+                span_list = item.find_all('span')
+                if span_list[1].text == team_name:
+                    tot = span_list[2].text  # 上场
+                    first = span_list[3].text  # 首发
+                    goal = span_list[4].text  # 进球
+                    ass = span_list[5].text  # 助攻
+                    yc = span_list[6].text  # 黄牌
+                    rc = span_list[7].text  # 红牌
+                    break
 
-    print(player_dict)
-    return player_dict, african_player
+            african_player.append({'id':player_id, 'name':player_name, 'nation':player_nation, 'capability':capability,
+            'total':tot, 'first':first, 'goal':goal, 'assist':ass, 'yellow_card':yc, 'red_card':rc})  # dict形式存取球员数据
+
+    # print(african_player)
+    return african_player
 
 # 爬虫入口
 def get_data(url):
@@ -79,20 +100,24 @@ def get_data(url):
     club_data = {}
     for item in team_list:
         team_name = item[item.find('team_name:'):item.find('}')][11:-1] # 获取球队名
-        team_id = item[item.find('team_id:'):item.find(',team_logo')][9:-1]  # 获取该成员id
+        team_id = item[item.find('team_id:'):item.find(',team_logo')][9:-1]  # 获取该球队id
         print(team_name+ ', ' + team_id)
         club_data[team_name] = {}
-        player_dict, african_player = get_club_data(base + "/team/"+team_id+".html")
-        club_data[team_name]['players'] = player_dict
-        club_data[team_name]['african_player'] = african_player
+        african_player = get_club_data(base + "/team/"+team_id+".html", team_name)
+        club_data[team_name] = african_player
         print(team_name+' 数据爬取完毕！')
+        df = pd.DataFrame(african_player)
+        pd.set_option('display.width', 180) # 设置输出宽度(**重要**)
+        print(df)
+        df.to_csv('data/'+team_name+'.csv')
 
-    print(club_data)
+    # print(club_data)
 
 
 if __name__ == "__main__":
     print("---------------------------------------------------------------------------------------------------")
     print("---------------------------------------------------------------------------------------------------")
+    #african_player = get_club_data(base + "/team/50000556.html")
     get_data(base + '/data/1')  # 传参的url为英超数据页
 
 
